@@ -2,6 +2,7 @@
 
     askdata "上周的 GMV 是多少"        问一个问题
     askdata                           交互模式，输入 exit 退出
+    askdata --mode pipeline "..."     用 M1 的固定流水线回答
 """
 
 from __future__ import annotations
@@ -10,9 +11,11 @@ import argparse
 import sys
 
 from askdata import catalog as catalog_mod
+from askdata import config
 from askdata.answer import Answer
+from askdata.engine import MODES, make_engine
 from askdata.llm import OpenAIChat
-from askdata.pipeline import Pipeline
+from askdata.trace import TraceWriter, short
 
 MAX_SHOW = 20
 
@@ -50,20 +53,40 @@ def show(answer: Answer) -> str:
     return '\n'.join(out)
 
 
+def progress(kind: str, data: dict) -> None:
+    """把 Agent 的每一步打印出来。"""
+    if kind == 'tool' and data['name'] != 'final_answer':
+        print(f'⏺ {data["name"]}({short(data["arguments"], 120)})')
+        result = data['result']
+        if 'error' in result:
+            print(f'  ⎿ ✗ {short(result["error"], 200)}')
+        elif data['name'] == 'find_tables':
+            print(f'  ⎿ {", ".join(t["name"] for t in result["tables"]) or "没有命中"}')
+        elif data['name'] == 'run_query':
+            print(f'  ⎿ {result["row_count"]} 行')
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog='askdata', description='用自然语言查询演示数据库')
     parser.add_argument('question', nargs='?', help='要问的问题；不给就进入交互模式')
+    parser.add_argument('--mode', choices=MODES, default=MODES[-1], help=f'默认 {MODES[-1]}')
     args = parser.parse_args(argv)
 
     catalog = catalog_mod.load()
     model = OpenAIChat()
-    pipeline = Pipeline(catalog, model)
+    trace = TraceWriter()
+    model.on_call = trace.on_llm_call
+    engine = make_engine(args.mode, catalog, model, listeners=[trace, progress])
 
     def ask(q: str) -> None:
-        answer = pipeline.ask(q)
+        before = (model.usage.calls, model.usage.prompt_tokens, model.usage.completion_tokens, model.usage.seconds)
+        answer = engine.ask(q)
         print(show(answer))
         u = model.usage
-        print(f'\n── {answer.kind} · 模型调用 {u.calls} 次 · 输入 {u.prompt_tokens} / 输出 {u.completion_tokens} token · {u.seconds:.1f} 秒')
+        print(
+            f'\n── {answer.kind} · 模型调用 {u.calls - before[0]} 次 · 输入 {u.prompt_tokens - before[1]} / 输出 {u.completion_tokens - before[2]} token'
+            f' · {u.seconds - before[3]:.1f} 秒 · Trace：{trace.path.relative_to(config.ROOT)}'
+        )
 
     if args.question:
         ask(args.question)

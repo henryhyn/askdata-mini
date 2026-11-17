@@ -25,6 +25,7 @@ from askdata import config
 from askdata.engine import MODES, make_engine
 from askdata.llm import OpenAIChat
 from askdata.retrieval import TableIndex
+from askdata.trace import TraceWriter
 from evals.compare import same_result
 
 HERE = Path(__file__).parent
@@ -58,7 +59,9 @@ def judge(case: dict, answer) -> tuple[bool, str]:
 
 def run_one(case: dict, mode: str, catalog, index) -> dict:
     model = OpenAIChat()
-    engine = make_engine(mode, catalog, model, index)
+    trace = TraceWriter()
+    model.on_call = trace.on_llm_call
+    engine = make_engine(mode, catalog, model, index, listeners=[trace])
     start = time.monotonic()
     answer = None
     try:
@@ -77,6 +80,7 @@ def run_one(case: dict, mode: str, catalog, index) -> dict:
         'llm_calls': model.usage.calls,
         'prompt_tokens': model.usage.prompt_tokens,
         'completion_tokens': model.usage.completion_tokens,
+        'trace': str(trace.path.relative_to(config.ROOT)),
     }
     if answer is not None:
         a = asdict(answer)
