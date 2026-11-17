@@ -157,6 +157,8 @@ class Toolbox:
         column = table.columns.get(args.column)
         if column is None:
             return {'error': f'表 {args.table} 没有列 {args.column}，它的列：{", ".join(table.columns)}'}
+        if column.name in table.sensitive:
+            return {'error': f'{table.name}.{column.name} 是敏感字段，不能查询'}
         labels = self.catalog.enums.get(f'{table.name}.{column.name}', {})
         kw = args.keyword.strip()
 

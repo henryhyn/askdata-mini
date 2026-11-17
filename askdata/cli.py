@@ -3,6 +3,7 @@
     askdata "上周的 GMV 是多少"        问一个问题
     askdata                           交互模式，输入 exit 退出
     askdata --mode pipeline "..."     用 M1 的固定流水线回答
+    askdata --regions east,north      以只能看华东、华北数据的身份提问 (行级权限)
 """
 
 from __future__ import annotations
@@ -70,13 +71,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog='askdata', description='用自然语言查询演示数据库')
     parser.add_argument('question', nargs='?', help='要问的问题；不给就进入交互模式')
     parser.add_argument('--mode', choices=MODES, default=MODES[-1], help=f'默认 {MODES[-1]}')
+    parser.add_argument('--regions', help='行级权限：只能看这些大区的数据，逗号分隔，如 east,north')
     args = parser.parse_args(argv)
 
     catalog = catalog_mod.load()
     model = OpenAIChat()
     trace = TraceWriter()
     model.on_call = trace.on_llm_call
-    engine = make_engine(args.mode, catalog, model, listeners=[trace, progress])
+    regions = [r.strip() for r in args.regions.split(',') if r.strip()] if args.regions else None
+    engine = make_engine(args.mode, catalog, model, listeners=[trace, progress], regions=regions)
 
     def ask(q: str) -> None:
         before = (model.usage.calls, model.usage.prompt_tokens, model.usage.completion_tokens, model.usage.seconds)
@@ -91,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.question:
         ask(args.question)
         return 0
-    print('输入问题，exit 退出')
+    print('输入问题，可以接着上一个问题追问；exit 退出')
     while True:
         try:
             q = input('\n> ').strip()

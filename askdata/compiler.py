@@ -25,9 +25,10 @@ class IRError(Exception):
 
 @dataclass
 class Policy:
-    """本次查询的访问控制 (M4)。"""
+    """本次查询的访问控制。敏感字段、分区约束是数据字典里的规则，对所有人生效；这里放因人、因轮而异的部分。"""
 
     candidates: set[str] | None = None  # 只能查这些表；None 表示不限制
+    regions: list[str] | None = None  # 行级权限：只能看这些大区的数据；None 表示不限制
 
 
 @dataclass
@@ -82,6 +83,8 @@ class _Compiler:
         table = self.catalog.tables[self.aliases[alias]]
         if col not in table.columns:
             raise IRError(f'表 {table.name} 没有列 {col}，它的列：{", ".join(table.columns)}')
+        if col in table.sensitive:
+            raise IRError(f'{table.name}.{col} 是敏感字段，不能查询。如实告诉用户没有权限，不要换个方式去取')
         return alias, col, table.columns[col]
 
     def col_sql(self, ref: str) -> tuple[str, Column]:
@@ -126,6 +129,8 @@ class _Compiler:
             raise IRError(f'有聚合时，select 里的普通列必须写进 group_by：{missing}')
 
         where = [self.filter(f) for f in ir.where]
+        self.check_partitions(ir)
+        where += self.row_scope()
         having = []
         for h in ir.having:
             expr = self.agg_expr(h.agg, h.column)
@@ -153,6 +158,32 @@ class _Compiler:
             sql += '\nORDER BY ' + ', '.join(order)
         sql += f'\nLIMIT {limit}'
         return Compiled(sql=sql, params=self.params, labels=labels, tables=ir.tables(), limit=limit)
+
+    def check_partitions(self, ir: QueryIR) -> None:
+        """分区大表必须按分区列过滤，防止一次查询扫遍全部历史数据。"""
+        filtered = {self.resolve(f.column)[:2] for f in ir.where}
+        for alias, name in self.aliases.items():
+            p = self.catalog.tables[name].partition
+            if p and (alias, p) not in filtered:
+                raise IRError(f'{name} 是按 {p} 分区的大表，where 里必须有 {alias}.{p} 的过滤条件 (如某一天或某个日期范围)')
+
+    def row_scope(self) -> list[str]:
+        """行级权限：按 Policy.regions 给每张受控的表注入过滤条件。条件由代码加，不出现在 IR 里，模型改不了。
+
+        注意：只有带大区字段的表受控。order_items 这类不带大区的表单独查时不受限制，
+        真实系统里行级权限应该在数据库层 (视图、行级安全策略、按人分配的只读账号) 强制，编译器里注入只是演示。"""
+        regions = self.policy.regions
+        if regions is None:
+            return []
+        if not regions:
+            raise IRError('当前用户没有任何大区的数据权限')
+        out = []
+        for alias, name in self.aliases.items():
+            col = self.catalog.tables[name].row_scope
+            if col:
+                self.params += regions
+                out.append(f'{alias}.{_q(col)} IN ({", ".join("?" * len(regions))})')
+        return out
 
     def agg_expr(self, agg: str, column: str | None) -> str:
         if column is None:

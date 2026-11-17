@@ -61,7 +61,7 @@ def run_one(case: dict, mode: str, catalog, index) -> dict:
     model = OpenAIChat()
     trace = TraceWriter()
     model.on_call = trace.on_llm_call
-    engine = make_engine(mode, catalog, model, index, listeners=[trace])
+    engine = make_engine(mode, catalog, model, index, listeners=[trace], regions=case.get('regions'))
     start = time.monotonic()
     answer = None
     try:
@@ -157,6 +157,8 @@ def main() -> int:
 
     catalog = catalog_mod.load()
     index = TableIndex(catalog)
+    if args.mode == 'pipeline':
+        cases = [c for c in cases if 'regions' not in c]  # 流水线不支持行级权限
     jobs = [c for c in cases for _ in range(args.repeat)]
     with ThreadPoolExecutor(args.workers) as pool:
         records = list(pool.map(lambda c: run_one(c, args.mode, catalog, index), jobs))

@@ -17,9 +17,13 @@ def columns_brief(catalog: Catalog, tables: list[str], probe: bool = False) -> s
     for name in tables:
         t = catalog.tables[name]
         out.append(f'## {t.name} ({t.row_count} 行)\n{t.description}')
+        if t.partition:
+            out.append(f'按 {t.partition} 分区：查询必须带 {t.partition} 的过滤条件')
         for c in t.columns.values():
             mark = ''
-            if probe and (c.values is not None or f'{name}.{c.name}' in catalog.enums):
+            if c.name in t.sensitive:
+                mark = ' (敏感字段，不能查询)'
+            elif probe and (c.values is not None or f'{name}.{c.name}' in catalog.enums):
                 mark = ' (过滤前用 probe_column_values 确认取值)'
             out.append(f'- {c.name} [{KIND[c.kind]}]：{c.description}{mark}')
         joins = [f'{t.name}.{j.column} = {j.table}.{j.target}' for j in t.joins if j.table in tables]
