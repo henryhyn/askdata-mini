@@ -1,0 +1,169 @@
+{
+  "tables": [
+    {
+      "name": "orders",
+      "description": "订单主表，2026 年起的全部订单，一行一个订单。下单时间、订单状态、下单平台、实付金额都在这里",
+      "columns": {
+        "order_id": "订单号",
+        "user_id": "下单用户 ID，关联 users.user_id",
+        "order_time": "下单时间",
+        "status": "订单状态 (编码)",
+        "platform": "下单平台，如 App、网页、小程序",
+        "region_code": "订单所属大区 (编码)，取下单用户的注册大区",
+        "total_amount": "订单原价总额 (元)，未扣优惠",
+        "coupon_amount": "优惠券抵扣金额 (元)",
+        "pay_amount": "实付金额 (元) = 原价总额 - 优惠券抵扣"
+      },
+      "row_scope": "region_code",
+      "joins": [
+        {"column": "user_id", "table": "users", "target": "user_id"},
+        {"column": "region_code", "table": "regions", "target": "region_code"}
+      ]
+    },
+    {
+      "name": "order_items",
+      "description": "订单明细，一行是订单里的一个商品，含购买件数和成交单价。按商品、类目统计销量用这张表",
+      "columns": {
+        "item_id": "明细 ID",
+        "order_id": "订单号，关联 orders.order_id",
+        "product_id": "商品 ID，关联 products.product_id",
+        "quantity": "购买件数",
+        "unit_price": "成交单价 (元)"
+      },
+      "joins": [
+        {"column": "order_id", "table": "orders", "target": "order_id"},
+        {"column": "product_id", "table": "products", "target": "product_id"}
+      ]
+    },
+    {
+      "name": "users",
+      "description": "用户表，一行一个注册用户：注册日期、所在城市和大区、注册渠道、是否会员",
+      "columns": {
+        "user_id": "用户 ID",
+        "register_date": "注册日期",
+        "city_id": "所在城市 (编码)",
+        "region_code": "所在大区 (编码)",
+        "channel": "注册渠道 (编码)",
+        "is_vip": "是否付费会员 (编码)",
+        "real_name": "真实姓名",
+        "phone": "手机号"
+      },
+      "row_scope": "region_code",
+      "sensitive": ["real_name", "phone"],
+      "joins": [
+        {"column": "city_id", "table": "cities", "target": "city_id"},
+        {"column": "region_code", "table": "regions", "target": "region_code"}
+      ]
+    },
+    {
+      "name": "products",
+      "description": "商品表：商品名称、所属类目、标价",
+      "columns": {
+        "product_id": "商品 ID",
+        "product_name": "商品名称",
+        "category_id": "所属类目 ID，关联 categories.category_id",
+        "price": "标价 (元)"
+      },
+      "joins": [{"column": "category_id", "table": "categories", "target": "category_id"}]
+    },
+    {
+      "name": "categories",
+      "description": "商品类目维表：类目 ID 和类目名称",
+      "columns": {"category_id": "类目 ID", "category_name": "类目名称"}
+    },
+    {
+      "name": "regions",
+      "description": "大区维表：大区编码和中文名称 (华东、华北等)",
+      "columns": {"region_code": "大区编码", "region_name": "大区名称"}
+    },
+    {
+      "name": "cities",
+      "description": "城市维表：城市 ID、城市名称、所属大区",
+      "columns": {"city_id": "城市 ID", "city_name": "城市名称", "region_code": "所属大区编码"},
+      "joins": [{"column": "region_code", "table": "regions", "target": "region_code"}]
+    },
+    {
+      "name": "refunds",
+      "description": "退款记录，一行一笔退款：退款时间、退款金额、退款原因",
+      "columns": {
+        "refund_id": "退款 ID",
+        "order_id": "原订单号，关联 orders.order_id",
+        "refund_time": "退款时间",
+        "refund_amount": "退款金额 (元)",
+        "reason_code": "退款原因 (编码)"
+      },
+      "joins": [{"column": "order_id", "table": "orders", "target": "order_id"}]
+    },
+    {
+      "name": "user_daily_active",
+      "description": "用户日活跃明细，按天分区，一行是某个用户某天的一次活跃：活跃平台、App 版本、使用时长。算日活 (DAU)、活跃用户数用这张表",
+      "columns": {
+        "dt": "分区日期，即活跃日期",
+        "user_id": "活跃用户 ID，关联 users.user_id",
+        "platform": "活跃平台",
+        "app_version": "App 版本号",
+        "duration_sec": "当天使用时长 (秒)"
+      },
+      "partition": "dt",
+      "joins": [{"column": "user_id", "table": "users", "target": "user_id"}]
+    },
+    {
+      "name": "ad_spend_daily",
+      "description": "每日广告投放花费，按渠道统计：花费金额、点击数",
+      "columns": {"dt": "日期", "channel": "投放渠道 (编码，与 users.channel 同一套)", "cost": "花费 (元)", "clicks": "点击数"}
+    },
+    {
+      "name": "cs_tickets",
+      "description": "客服工单：用户提交的咨询、投诉，含工单内容和是否已解决",
+      "columns": {
+        "ticket_id": "工单 ID",
+        "user_id": "提交用户 ID",
+        "created_at": "提交时间",
+        "category": "工单类型 (编码)",
+        "content": "工单内容 (用户填写的原文)",
+        "solved": "是否已解决 (编码)"
+      }
+    },
+    {
+      "name": "warehouses",
+      "description": "仓库维表：仓库名称和所在大区",
+      "columns": {"warehouse_id": "仓库 ID", "warehouse_name": "仓库名称", "region_code": "所在大区编码"}
+    },
+    {
+      "name": "inventory",
+      "description": "当前库存快照：每个仓库每个商品的库存件数",
+      "columns": {"warehouse_id": "仓库 ID，关联 warehouses.warehouse_id", "product_id": "商品 ID，关联 products.product_id", "stock": "库存件数"},
+      "joins": [
+        {"column": "warehouse_id", "table": "warehouses", "target": "warehouse_id"},
+        {"column": "product_id", "table": "products", "target": "product_id"}
+      ]
+    },
+    {
+      "name": "orders_archive_2025",
+      "description": "【已停用】2025 年订单归档，只有 2025 年的数据，2026 年的订单请用 orders",
+      "columns": {"order_id": "订单号", "user_id": "用户 ID", "order_time": "下单时间", "status": "订单状态 (编码)", "pay_amount": "实付金额 (元)"}
+    }
+  ],
+  "enums": {
+    "orders.status": {"1": "待支付", "2": "已支付", "3": "已发货", "4": "已完成", "5": "已取消"},
+    "orders_archive_2025.status": {"1": "待支付", "2": "已支付", "3": "已发货", "4": "已完成", "5": "已取消"},
+    "orders.platform": {"ios": "iOS App", "android": "安卓 App", "web": "网页", "mini_program": "微信小程序"},
+    "orders.region_code": {"east": "华东", "north": "华北", "south": "华南", "central": "华中", "west": "西部"},
+    "users.region_code": {"east": "华东", "north": "华北", "south": "华南", "central": "华中", "west": "西部"},
+    "users.channel": {"1": "应用商店", "2": "搜索广告", "3": "好友邀请", "4": "自然流量"},
+    "ad_spend_daily.channel": {"1": "应用商店", "2": "搜索广告", "3": "好友邀请", "4": "自然流量"},
+    "users.is_vip": {"0": "普通用户", "1": "付费会员"},
+    "users.city_id": "@cities.city_id:city_name",
+    "refunds.reason_code": {"1": "不想要了", "2": "商品质量问题", "3": "发货太慢", "4": "商品与描述不符", "5": "其他", "9": "其他 (旧口径，2026 年 2 月起停用)"},
+    "user_daily_active.platform": {"ios": "iOS App", "android": "安卓 App", "web": "网页"},
+    "cs_tickets.category": {"1": "物流催单", "2": "退货退款", "3": "优惠券", "4": "修改地址", "5": "会员咨询"},
+    "cs_tickets.solved": {"0": "未解决", "1": "已解决"}
+  },
+  "metrics": [
+    {"name": "GMV", "definition": "成交总额：订单状态为已支付、已发货、已完成的订单的实付金额 (orders.pay_amount) 之和，按下单时间归属日期；已取消、待支付的订单不计入"},
+    {"name": "订单数", "definition": "未特别说明时，指所有状态的订单数 (含待支付、已取消)"},
+    {"name": "新用户 / 新注册用户", "definition": "按 users.register_date 落在统计区间内计"},
+    {"name": "日活 (DAU) / 活跃用户数", "definition": "user_daily_active 里某天 (或某区间) 去重的 user_id 个数"},
+    {"name": "销量 / 销售件数", "definition": "已支付、已发货、已完成订单的 order_items.quantity 之和，按订单的下单时间归属日期；已取消、待支付的订单不计入"}
+  ]
+}
