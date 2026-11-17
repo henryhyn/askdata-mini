@@ -22,6 +22,7 @@ from askdata.executor import QueryResult, run_ir, validation_message
 from askdata.ir import QueryIR
 from askdata.retrieval import TableIndex
 
+PROBE_LIMIT = 50  # probe 最多返回的取值个数
 SAMPLE_ROWS = 5  # 只把几行样例回给模型；完整结果绕过模型直接交给调用方，模型不需要也不应该复述大段数据
 
 
@@ -46,6 +47,17 @@ class GetTableColumns(BaseModel):
 
     model_config = ConfigDict(extra='forbid')
     tables: list[str] = Field(min_length=1, description='表名，来自 find_tables 的结果')
+
+
+class ProbeColumnValues(BaseModel):
+    """查某一列的真实取值，写过滤条件之前用它确认取值，不要猜。
+    编码字段 (如状态、渠道) 会同时返回编码和含义，过滤条件里填编码；取值很多的编码字段 (如城市) 要给 keyword 按含义搜。
+    返回的 closed 为 false 时，值集来自抽样、可能不完整：没查到不等于不存在，不要据此写取反或穷举式的过滤，也不要告诉用户“没有这个取值”。"""
+
+    model_config = ConfigDict(extra='forbid')
+    table: str
+    column: str
+    keyword: str = Field(default='', description='按取值或含义筛选，如“已取消”“杭州”；不给就返回全部取值')
 
 
 class RunQuery(BaseModel):
@@ -97,6 +109,7 @@ class Toolbox:
         self.handlers: dict[str, tuple[type[BaseModel], Callable]] = {
             'find_tables': (FindTables, self.find_tables),
             'get_table_columns': (GetTableColumns, self.get_table_columns),
+            'probe_column_values': (ProbeColumnValues, self.probe_column_values),
             'run_query': (RunQuery, self.run_query),
         }
 
@@ -132,10 +145,42 @@ class Toolbox:
             return {'error': f'这些表不存在：{unknown}，先用 find_tables 检索'}
         scope = list(dict.fromkeys(known + sorted(set().union(*(self.catalog.neighbors(t) for t in known)))))
         self.state.candidates |= set(scope)
-        out: dict = {'columns': columns_brief(self.catalog, scope)}
+        out: dict = {'columns': columns_brief(self.catalog, scope, probe=True)}
         if unknown:
             out['note'] = f'这些表不存在，已忽略：{unknown}'
         return out
+
+    def probe_column_values(self, args: ProbeColumnValues) -> dict:
+        table = self.catalog.table(args.table)
+        if table is None:
+            return {'error': f'表 {args.table} 不存在'}
+        column = table.columns.get(args.column)
+        if column is None:
+            return {'error': f'表 {args.table} 没有列 {args.column}，它的列：{", ".join(table.columns)}'}
+        labels = self.catalog.enums.get(f'{table.name}.{column.name}', {})
+        kw = args.keyword.strip()
+
+        def hit(value) -> bool:
+            label = labels.get(str(value), '')
+            # 用户说“小程序”，含义是“微信小程序”；用户说“已取消的”，含义是“已取消”：两个方向都算命中
+            return not kw or kw in str(value) or (label and (kw in label or label in kw))
+
+        if column.values is not None:
+            values = [v for v in column.values if hit(v)][:PROBE_LIMIT]
+            out: dict = {'enumerable': True, 'closed': column.closed, 'values': values}
+            if labels:
+                out['labels'] = {str(v): labels[str(v)] for v in values if str(v) in labels}  # 编码 → 含义，旁路给出，values 能原样填进过滤条件
+            if not column.closed:
+                out['note'] = '值集来自最新数据的抽样，可能不完整'
+            if kw and not values:
+                out['note'] = f'没有找到和“{kw}”匹配的取值' + ('' if column.closed else '；值集不完整，这个取值可能只是没被抽到')
+            return out
+        if labels:  # 取值太多的编码字段：值集给不全，但可以按含义在字典里搜
+            if not kw:
+                return {'enumerable': False, 'note': f'取值有 {len(labels)} 个，给 keyword 按含义搜'}
+            matches = {k: v for k, v in labels.items() if kw in v or v in kw}
+            return {'enumerable': False, 'matches': dict(list(matches.items())[:PROBE_LIMIT]) or None, 'note': '' if matches else f'字典里没有“{kw}”'}
+        return {'enumerable': False, 'note': '这一列取值很多，不是枚举，按范围或模糊匹配过滤'}
 
     def run_query(self, args: RunQuery) -> dict:
         self.state.attempts += 1

@@ -33,7 +33,8 @@ INSTRUCTIONS = """你是公司内部的数据分析助手，帮不会写 SQL 的
 
 工作方式：
 1. 闲聊、和数据无关、要求查看个人敏感信息或修改数据的请求：不调用其他工具，直接调用 final_answer(kind="reply") 回复。
-2. 查数据：find_tables 找表 → get_table_columns 看字段 → run_query 执行。只能查看过字段的表。
+2. 查数据：find_tables 找表 → get_table_columns 看字段 → probe_column_values 确认过滤条件的取值 → run_query 执行。只能查看过字段的表。
+   编码字段 (状态、渠道、原因等) 的取值一定要先 probe 确认，不要凭含义猜编码。
 3. 检索结果里没有合适的表，就换个说法再搜，不要在不相关的表上硬凑。
 4. run_query 失败时，根据错误修改 IR 再试。
 5. 取到数后调用 final_answer(kind="result", result_id=...)，result_id 是直接回答问题的那次查询。用户只会看到这一次查询的结果，summary 里不要引用其他查询的数。

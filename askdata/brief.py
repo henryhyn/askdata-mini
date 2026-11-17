@@ -11,14 +11,17 @@ from askdata.catalog import Catalog
 KIND = {'number': '数值', 'text': '文本', 'date': '日期 YYYY-MM-DD', 'datetime': '时间 YYYY-MM-DD HH:MM:SS'}
 
 
-def columns_brief(catalog: Catalog, tables: list[str]) -> str:
-    """表的字段说明，外加这些表之间可以怎么连接。"""
+def columns_brief(catalog: Catalog, tables: list[str], probe: bool = False) -> str:
+    """表的字段说明，外加这些表之间可以怎么连接。probe=True 时标出哪些列可以用 probe_column_values 查取值 (M3)。"""
     out = []
     for name in tables:
         t = catalog.tables[name]
         out.append(f'## {t.name} ({t.row_count} 行)\n{t.description}')
         for c in t.columns.values():
-            out.append(f'- {c.name} [{KIND[c.kind]}]：{c.description}')
+            mark = ''
+            if probe and (c.values is not None or f'{name}.{c.name}' in catalog.enums):
+                mark = ' (过滤前用 probe_column_values 确认取值)'
+            out.append(f'- {c.name} [{KIND[c.kind]}]：{c.description}{mark}')
         joins = [f'{t.name}.{j.column} = {j.table}.{j.target}' for j in t.joins if j.table in tables]
         if joins:
             out.append('可连接：' + '；'.join(joins))

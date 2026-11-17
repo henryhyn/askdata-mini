@@ -100,3 +100,35 @@ def test_tool_schema_has_no_refs(catalog, index):
     run_query = next(s for s in specs if s['function']['name'] == 'run_query')
     # IR 的字段规则随工具定义发给模型
     assert '编码字段填编码本身' in json.dumps(run_query, ensure_ascii=False)
+
+
+def probe(catalog, index, table, column, keyword=''):
+    import json
+
+    from askdata.tools import RunState, Toolbox
+
+    return Toolbox(catalog, index, RunState()).call('probe_column_values', json.dumps({'table': table, 'column': column, 'keyword': keyword}))
+
+
+def test_probe_maps_label_to_code(catalog, index):
+    assert probe(catalog, index, 'orders', 'status', '已取消') == {'enumerable': True, 'closed': True, 'values': [5], 'labels': {'5': '已取消'}}
+    assert probe(catalog, index, 'orders', 'platform', '小程序')['values'] == ['mini_program']
+
+
+def test_probe_high_cardinality_needs_keyword(catalog, index):
+    assert 'keyword' in probe(catalog, index, 'users', 'city_id')['note']
+    assert probe(catalog, index, 'users', 'city_id', '杭州')['matches'] == {'102': '杭州'}
+
+
+def test_probe_sampled_values_are_not_closed(catalog, index):
+    out = probe(catalog, index, 'user_daily_active', 'app_version', '6.0')
+    # 6.0 只出现在 1–2 月，最新数据的抽样里没有；值集要标成不完整，不能让模型以为不存在
+    assert out['closed'] is False and out['values'] == [] and '可能只是没被抽到' in out['note']
+
+
+def test_profile_rules(catalog):
+    orders = catalog.tables['orders']
+    assert orders.columns['status'].closed and orders.columns['status'].values == [1, 2, 3, 4, 5]
+    assert orders.columns['pay_amount'].values is None  # 金额不当枚举
+    assert orders.columns['order_time'].values is None  # 日期不当枚举
+    assert catalog.tables['refunds'].columns['reason_code'].values == [1, 2, 3, 4, 5, 9]  # 小表全表核实，老口径 9 也在
